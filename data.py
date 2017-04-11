@@ -7,14 +7,6 @@ from scipy import signal
 from scipy.optimize import leastsq
 import data_utils as du
 
-stationID = '9410230' # La Jolla
-stationIDbattery = '8518750' # Battery
-stationIDbroadway = '9410170' # San Diego
-yearstart = 2010
-yearend = 2010
-hourly_height = 'hourly_height'
-air_pressure = 'air_pressure'
-
 #### Pressure ####
 p, t_p = du.make_monthly_API_requests(stationID,yearstart,yearend,air_pressure)
 
