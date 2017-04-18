@@ -1,51 +1,123 @@
-import lstm
-import time
+#################################################
+##################### USAGE #####################
+"""
+Change variables in script then from command
+line, run the command:
+$ python run.py station.csv yearstart yearend
+"""
+#################################################
+import numpy as np
 import matplotlib.pyplot as plt
+import datetime as dt
+import matplotlib.dates as mdates
+import calendar
+from scipy import signal  
+from scipy.optimize import leastsq
+import data_utils as du
+import pandas as pd
+import time
+import sys
 
-def plot_results(predicted_data, true_data):
-    fig = plt.figure(facecolor='white')
-    ax = fig.add_subplot(111)
-    ax.plot(true_data, label='True Data')
-    plt.plot(predicted_data, label='Prediction')
-    plt.legend()
-    plt.show()
+start = time.time()
+print('Reading CSVs')
 
-def plot_results_multiple(predicted_data, true_data, prediction_len):
-    fig = plt.figure(facecolor='white')
-    ax = fig.add_subplot(111)
-    ax.plot(true_data, label='True Data')
-    #Pad the list of predictions to shift it in the graph to it's correct start
-    for i, data in enumerate(predicted_data):
-        padding = [None for p in range(i * prediction_len)]
-        plt.plot(padding + data, label='Prediction')
-        plt.legend()
-    plt.show()
+station_csv, yearstart, yearend = sys.argv[-3:]
 
-#Main Run Thread
-if __name__=='__main__':
-    global_start_time = time.time()
-    epochs  = 2
-    seq_len = 50
+#### dataframes ####
+station = pd.read_csv(station_csv, parse_dates=True)
 
-    print('> Loading data... ')
+#### Access data as numpy arrays ####
+"""
+dataframe is in format:
+   t_datetime, pressure, t_timestamp, water_level
+0           x          x           x            x
+1           x          x           x            x
+2           x          x           x            x
+"""
+t_datetime, pressure, t_timestamp, water_level = [station.as_matrix()[:,n] for n in range(1,5)]
+t_datetime = np.array(list(map(lambda s: dt.datetime.strptime(s, '%Y-%m-%d %H:%M:%S'), t_datetime)))
+year_index = np.array([x.year for x in t_datetime])
+indices = np.where((year_index >= int(yearstart)) & (year_index <= int(yearend)))[0]
 
-    X_train, y_train, X_test, y_test = lstm.load_data('new.csv', seq_len, False)
+t_datetime, pressure, t_timestamp, water_level = t_datetime[indices[0]:indices[-1]], pressure[indices[0]:indices[-1]], t_timestamp[indices[0]:indices[-1]], water_level[indices[0]:indices[-1]]
 
-    print('> Data Loaded. Compiling...')
+water_level = water_level.astype('float')
+pressure = pressure.astype('float')
+water_level = water_level.astype('float')
 
-    model = lstm.build_model([1, 50, 100, 1])
+print('Fitting tidal components, {}'.format(time.time() - start))
+#### Fitting tidal component ####
+water_level_average = []
+windowwidth = 1  #  in array indices
+for i in range(len(t_datetime)):
+    lo, hi = i - windowwidth, i + windowwidth
+    if lo < 0:
+        lo = 0
+    if hi >= len(water_level):
+        hi = len(water_level) - 1
+    ind_window = water_level[lo: hi]
+    water_level_average.append(np.average(ind_window))
+water_level_average = np.array(water_level_average)
 
-    model.fit(
-        X_train,
-        y_train,
-        batch_size=512,
-        nb_epoch=epochs,
-        validation_split=0.05)
+print('Finding pressure and water level correlations, {}'.format(time.time() - start))
+#### Pressure and Water Level Correlation ####
+pressure_waterlevel_corrcoef = np.corrcoef(pressure,water_level)[0][1]
+print("Pressure and Water Level Correlation: {}".format(pressure_waterlevel_corrcoef))
 
-    # predictions = lstm.predict_sequences_multiple(model, X_test, seq_len, 50)
-    # predicted = lstm.predict_sequence_full(model, X_test, seq_len)
-    predicted = lstm.predict_point_by_point(model, X_test)        
+print('doing Fourier transforms, {}'.format(time.time() - start))
+#### Fourier stuff ####
+sp_water_level = np.fft.fft(water_level)
+sp_water_level_fit = np.fft.fft(water_level_average)
+freq = np.fft.fftfreq(t_timestamp.shape[0],d=1.0)
 
-    print('Training duration (s) : ', time.time() - global_start_time)
-    # plot_results_multiple(predictions, y_test, 50)
-    plot_results(predicted, y_test)
+print('Finding exceedence probabilities, {}'.format(time.time() - start))
+#### Exceedence Probability #####
+water_level_sorted = np.sort(water_level)
+water_level_rank = np.arange(len(water_level_sorted))
+water_level_normalized_rank = (1.0*water_level_rank)/len(water_level_sorted)
+
+exceedenceproball = [1 - n for n in water_level_normalized_rank]
+
+##########################################################################################
+######################################## Graphing ########################################
+##########################################################################################
+print('graphing, {}'.format(time.time() - start))
+autoTicks = mdates.AutoDateLocator()
+autoFmt = mdates.AutoDateFormatter(autoTicks)
+fig = plt.figure(figsize=(20,10))
+
+# air pressure
+ax1 = fig.add_subplot(511)
+ax1.plot(mdates.date2num(t_datetime),pressure,color='red')
+ax1.set_ylabel('Pressure')
+ax1.xaxis.set_major_locator(autoTicks)
+ax1.xaxis.set_major_formatter(autoFmt)
+
+# water level
+ax2 = fig.add_subplot(512)
+ax2.plot(mdates.date2num(t_datetime),water_level,color='red')
+ax2.plot(mdates.date2num(t_datetime),water_level_average,color='black',linewidth=2.0) #tidal
+ax2.set_ylabel('Water Level')
+ax2.xaxis.set_major_locator(autoTicks)
+ax2.xaxis.set_major_formatter(autoFmt)
+
+# water level - tidal component
+ax3 = fig.add_subplot(513)
+ax3.plot(mdates.date2num(t_datetime),water_level - water_level_average,color='red')
+ax3.set_ylabel('Residual')
+ax3.xaxis.set_major_locator(autoTicks)
+ax3.xaxis.set_major_formatter(autoFmt)
+
+# signals
+ax4 = fig.add_subplot(514)
+ax4.plot(freq[1:int(len(freq)/2)],np.abs(sp_water_level[1:int(len(sp_water_level)/2)]),color='black')
+ax4.plot(freq[1:int(len(freq)/2)],np.abs(sp_water_level_fit [1:int(len(sp_water_level_fit)/2)]),color='red')
+ax4.legend(['Original Data','Fit Data'],loc=0)
+ax4.set_ylabel('Signal Analysis')
+
+# water level - tidal component
+ax5 = fig.add_subplot(515)
+ax5.plot(water_level_sorted,exceedenceproball)
+ax5.set_ylabel('Exceedence')
+
+plt.show()

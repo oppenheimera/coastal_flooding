@@ -1,9 +1,9 @@
 #################################################
 ##################### USAGE #####################
 """
-Change variables in scriptm then from command
+Change variables in script then from command
 line, run the command:
-$ python write_to_csv target_name.csv 
+$ python write_to_csv.py target_name.csv 
 """
 #################################################
 
@@ -11,15 +11,16 @@ import sys
 import pandas as pd
 import data_utils as du
 
+stationIDptreyes = '9415020' # Pt Reyes
 stationIDlajolla = '9410230' # La Jolla
 stationIDbroadway = '9410170' # San Diego
-stationID = stationIDbroadway
 yearstart = 1975
 yearend = 2015
 hourly_height = 'hourly_height'
 air_pressure = 'air_pressure'
 
 filename = sys.argv[-1]
+stationID = stationIDptreyes
 
 #### get pressure ####
 p, t_p = du.make_monthly_API_requests(stationID, yearstart, yearend, air_pressure)
